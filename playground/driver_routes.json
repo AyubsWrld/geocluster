@@ -1,0 +1,54 @@
+{
+  "driver_1": {
+    "waypoints": [
+      {
+        "location": "15277 Castle Downs Rd NW, Edmonton, AB",
+        "stopover": true
+      },
+      {
+        "location": "11920 129 Ave NW, Edmonton, AB",
+        "stopover": true
+      },
+      {
+        "location": "11320 132 Ave NW, Edmonton, AB",
+        "stopover": true
+      }
+    ]
+  },
+  "driver_3": {
+    "waypoints": [
+      {
+        "location": "15178 127 St NW, Edmonton, AB",
+        "stopover": true
+      },
+      {
+        "location": "10408 124 St NW, Edmonton, AB",
+        "stopover": true
+      },
+      {
+        "location": "10363 Jasper Ave NW, Edmonton, AB",
+        "stopover": true
+      },
+      {
+        "location": "10025 102A Ave NW, Edmonton, AB T5J 2Z2",
+        "stopover": true
+      }
+    ]
+  },
+  "driver_2": {
+    "waypoints": [
+      {
+        "location": "4501 30 Ave NW, Edmonton, AB",
+        "stopover": true
+      },
+      {
+        "location": "4225 118 Ave NW, Edmonton, AB",
+        "stopover": true
+      },
+      {
+        "location": "2007 138 Ave NW, Edmonton, AB",
+        "stopover": true
+      }
+    ]
+  }
+}

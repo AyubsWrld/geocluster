@@ -3,153 +3,71 @@ from geopy.geocoders import Nominatim
 from sklearn.cluster import KMeans
 import time
 import random
-import logging
+import json
+from typing import List, Dict
 from geopy.exc import GeocoderTimedOut
-import googlemaps
-import plotly.express as px
-import plotly.graph_objects as go
-from typing import List, Dict  # Add this import
 
-class DeliveryClusterer:
-    def __init__(self, api_key: str):
-        """Initialize the clusterer with Nominatim geocoder and Google Maps client."""
+class SimpleDeliveryClusterer:
+    def __init__(self):
+        """Initialize the clusterer with Nominatim geocoder."""
         self.geolocator = Nominatim(user_agent="delivery_clusterer", timeout=10)
-        self.gmaps = googlemaps.Client(key="")
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
-        self.locations = []
-        self.valid_addresses = []
-        self.clusters = None
-        self.colors = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 
-                       'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 
-                       'darkpurple', 'pink', 'lightblue', 'lightgreen', 'gray']
-
+        
     def geocode_address(self, address: str) -> tuple:
-        """Convert a single address to coordinates with retries and longer timeout."""
+        """Convert a single address to coordinates with retries."""
         retries = 3
         for i in range(retries):
             try:
                 time.sleep(1)  # Respect rate limiting
                 location = self.geolocator.geocode(address)
                 if location:
-                    return (location.latitude, location.longitude)
+                    return {
+                        "location": address,
+                        "stopover": True,
+                        "coords": (location.latitude, location.longitude)
+                    }
             except GeocoderTimedOut:
                 if i < retries - 1:
-                    wait_time = (2 ** i) + random.uniform(0, 1)  # Exponential backoff
-                    self.logger.warning(f"Timeout on {address}. Retrying in {wait_time:.2f} seconds.")
+                    wait_time = (2 ** i) + random.uniform(0, 1)
                     time.sleep(wait_time)
                 else:
-                    self.logger.warning(f"Failed to geocode {address} after {retries} attempts")
                     return None
-            except Exception as e:
-                self.logger.warning(f"Failed to geocode {address}: {str(e)}")
+            except Exception:
                 return None
         return None
 
-    def cluster_addresses(self, addresses: List[str], num_drivers: int) -> Dict[int, List[str]]:
-        """Cluster addresses based on number of drivers."""
-        print("Converting addresses to coordinates...")
-        coordinates = []
-        
+    def cluster_addresses(self, addresses: List[str], num_drivers: int) -> Dict:
+        """Cluster addresses and return JSON-formatted results."""
+        # Convert addresses to coordinates
+        location_data = []
         for addr in addresses:
-            coords = self.geocode_address(addr)
-            if coords:
-                coordinates.append(coords)
-                self.valid_addresses.append(addr)
-            else:
-                print(f"Warning: Could not find coordinates for {addr}")
+            location = self.geocode_address(addr)
+            if location:
+                location_data.append(location)
 
-        if len(self.valid_addresses) < num_drivers:
-            raise ValueError(f"Not enough valid addresses ({len(self.valid_addresses)}) for {num_drivers} drivers")
+        if len(location_data) < num_drivers:
+            raise ValueError(f"Not enough valid addresses ({len(location_data)}) for {num_drivers} drivers")
+
+        # Extract coordinates for clustering
+        coordinates = [loc["coords"] for loc in location_data]
 
         # Perform clustering
-        print(f"\nClustering {len(self.valid_addresses)} addresses into {num_drivers} groups...")
         kmeans = KMeans(n_clusters=num_drivers, random_state=42)
-        self.clusters = kmeans.fit_predict(coordinates)
-        self.locations = np.array(coordinates)
+        clusters = kmeans.fit_predict(coordinates)
 
         # Organize results by driver
-        driver_assignments = {i: [] for i in range(num_drivers)}
-        for addr, cluster_id in zip(self.valid_addresses, self.clusters):
-            driver_assignments[cluster_id].append(addr)
+        driver_routes = {}
+        for i, cluster_id in enumerate(clusters):
+            driver_id = f"driver_{cluster_id + 1}"
+            if driver_id not in driver_routes:
+                driver_routes[driver_id] = {
+                    "waypoints": []
+                }
+            driver_routes[driver_id]["waypoints"].append({
+                "location": location_data[i]["location"],
+                "stopover": True
+            })
 
-        return driver_assignments
-
-    def get_shortest_path(self, start_coords: tuple, end_coords: tuple) -> List[Dict]:
-        """Get the shortest path between two coordinates using Google Maps Directions API."""
-        try:
-            directions_result = self.gmaps.directions(start_coords, end_coords, mode="driving")
-            if directions_result:
-                route = directions_result[0]['legs'][0]
-                return route['steps']  # List of steps in the route
-            else:
-                self.logger.warning("No directions found for the given coordinates.")
-                return []
-        except Exception as e:
-            self.logger.error(f"Error getting directions: {str(e)}")
-            return []
-
-    def visualize_clusters(self):
-        """Create interactive map with clusters and routes using Plotly."""
-        if self.clusters is None or len(self.locations) == 0:
-            raise ValueError("Must cluster locations before visualizing")
-
-        fig = go.Figure()
-
-        # Plot points for each cluster
-        for cluster_id in range(max(self.clusters) + 1):
-            mask = self.clusters == cluster_id
-            cluster_points = self.locations[mask]
-            cluster_addresses = np.array(self.valid_addresses)[mask]
-
-            # Plot points
-            for point, addr in zip(cluster_points, cluster_addresses):
-                fig.add_trace(go.Scattergeo(
-                    lon=[point[1]], lat=[point[0]],
-                    mode='markers+text',
-                    marker=dict(size=8, color=self.colors[cluster_id]),
-                    text=addr,
-                    textposition="bottom center",
-                    name=f"Cluster {cluster_id + 1}"
-                ))
-
-            # Calculate and visualize routes between addresses in the cluster
-            for i in range(len(cluster_points) - 1):
-                start_coords = cluster_points[i]
-                end_coords = cluster_points[i + 1]
-
-                # Get shortest path steps
-                steps = self.get_shortest_path(start_coords, end_coords)
-                if steps:
-                    # Create a list of lat/lon pairs for the route
-                    points = [(step['end_location']['lat'], step['end_location']['lng']) for step in steps]
-                    latitudes, longitudes = zip(*points)
-
-                    # Add a line for the route
-                    fig.add_trace(go.Scattergeo(
-                        lon=longitudes,
-                        lat=latitudes,
-                        mode='lines',
-                        line=dict(width=2, color=self.colors[cluster_id]),
-                        name=f"Route {i + 1} - Cluster {cluster_id + 1}"
-                    ))
-
-        # Update layout for better visualization
-        fig.update_layout(
-            title='Delivery Clusters and Routes',
-            showlegend=True,
-            geo=dict(
-                scope='north america',
-                projection_type='natural earth',
-                showland=True,
-                landcolor='lightgray',
-                countrycolor='white',
-                lataxis=dict(showgrid=True, gridcolor='white'),
-                lonaxis=dict(showgrid=True, gridcolor='white'),
-            )
-        )
-        
-        fig.show()
+        return driver_routes
 
 def main():
     # Sample addresses
@@ -166,32 +84,17 @@ def main():
         "10025 102A Ave NW, Edmonton, AB T5J 2Z2",
     ]
     
-    # Get number of drivers from user
-    while True:
-        try:
-            num_drivers = int(input(f"Enter number of drivers (2-{len(addresses)}): "))
-            if 2 <= num_drivers <= len(addresses):
-                break
-            print(f"Please enter a number between 2 and {len(addresses)}")
-        except ValueError:
-            print("Please enter a valid number")
-
-    # Create clusterer and process addresses
-    api_key = 'YOUR_API_KEY'  # Replace with your actual Google Maps API key
-    clusterer = DeliveryClusterer(api_key)
+    num_drivers = int(input(f"Enter number of drivers (2-{len(addresses)}): "))
+    
+    clusterer = SimpleDeliveryClusterer()
     try:
-        driver_assignments = clusterer.cluster_addresses(addresses, num_drivers)
+        routes = clusterer.cluster_addresses(addresses, num_drivers)
         
-        # Print results
-        print("\nDelivery Assignments:")
-        print("--------------------")
-        for driver_id, assigned_addresses in driver_assignments.items():
-            print(f"\nDriver {driver_id + 1}:")
-            for addr in assigned_addresses:
-                print(f"- {addr}")
-
-        # Visualize results
-        clusterer.visualize_clusters()
+        # Export to JSON file
+        with open('driver_routes.json', 'w') as f:
+            json.dump(routes, f, indent=2)
+            
+        print("Routes exported to driver_routes.json")
 
     except Exception as e:
         print(f"Error: {str(e)}")
