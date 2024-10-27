@@ -94,7 +94,7 @@ function RouteMap() {
 
 function View() {
   return (
-    <APIProvider apiKey={"AIzaSyAsUGZHvc6xQ64aI8XZ1Q_QKSPlrTwfVsg"} libraries={['routes']}>
+    <APIProvider apiKey={""} libraries={['routes']}>
       <RouteMap />
     </APIProvider>
   );
